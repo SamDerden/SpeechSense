@@ -25,7 +25,7 @@ def main():
         return
     tmp = TARGET.with_suffix(".part")
     try:
-        result = gdown.download(url=URL, output=str(tmp), fuzzy=True, quiet=False)
+        result = gdown.download(id="1ShejwvJSUKxZ6mYEuJkrtqjwS0BiLZy_", output=str(tmp), quiet=False)
         if not result or not tmp.exists():
             raise RuntimeError("Google Drive download failed. Check sharing permissions and quota.")
         verify(tmp)
