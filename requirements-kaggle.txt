@@ -1,0 +1,10 @@
+numpy==1.26.4
+pandas==2.2.3
+scikit-learn==1.8.0
+transformers==4.49.0
+datasets==3.3.2
+accelerate==1.4.0
+sentencepiece==0.2.0
+sacremoses==0.1.1
+nlpaug==1.1.11
+pytest==8.3.5
