@@ -53,13 +53,43 @@ class WeightedTrainer(Trainer):
         super().__init__(*args, **kwargs)
         self.weights = weights
         self.differential = differential
+        self.technique = "baseline"
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         labels = inputs.pop("labels")
+        if self.technique == "mixup" and model.training:
+            emb = model.get_input_embeddings()(inputs["input_ids"])
+            perm = torch.randperm(len(labels), device=labels.device)
+            lam = float(np.random.beta(.2,.2))
+            mask = inputs["attention_mask"]
+            out = model(inputs_embeds=lam*emb+(1-lam)*emb[perm], attention_mask=torch.maximum(mask,mask[perm]))
+            loss = lam*torch.nn.functional.cross_entropy(out.logits,labels)+(1-lam)*torch.nn.functional.cross_entropy(out.logits,labels[perm])
+            return (loss,out) if return_outputs else loss
         out = model(**inputs)
         loss = torch.nn.functional.cross_entropy(out.logits, labels,
             weight=self.weights.to(out.logits.device) if self.weights is not None else None,
             label_smoothing=self.args.label_smoothing_factor)
         return (loss, out) if return_outputs else loss
+    def training_step(self, model, inputs, num_items_in_batch=None):
+        if self.technique != "fgm":
+            return super().training_step(model, inputs, num_items_in_batch)
+        model.train()
+        inputs = self._prepare_inputs(inputs)
+        with self.compute_loss_context_manager():
+            loss = self.compute_loss(model, dict(inputs))
+        emb = self.accelerator.unwrap_model(model).get_input_embeddings().weight
+        grad = torch.autograd.grad(loss, emb, retain_graph=True)[0]
+        self.accelerator.backward(loss / self.args.gradient_accumulation_steps)
+        delta = grad / grad.norm().clamp_min(1e-12)
+        with torch.no_grad():
+            emb.add_(delta)
+        try:
+            with self.compute_loss_context_manager():
+                adv = self.compute_loss(model, dict(inputs))
+            self.accelerator.backward(adv / self.args.gradient_accumulation_steps)
+        finally:
+            with torch.no_grad():
+                emb.sub_(delta)
+        return (loss.detach()+adv.detach()) / self.args.gradient_accumulation_steps
     def create_optimizer(self):
         if not self.differential:
             return super().create_optimizer()
@@ -81,7 +111,7 @@ def main():
     p.add_argument("--data", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--model", choices=MODELS, required=True)
-    p.add_argument("--technique", choices=["baseline","weighted","differential","smoothing","clipping"], default="baseline")
+    p.add_argument("--technique", choices=["baseline","weighted","differential","smoothing","clipping","custom_head","mean_pool","mixup","fgm"], default="baseline")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--epochs", type=int, default=3)
     p.add_argument("--batch", type=int, default=8)
@@ -106,8 +136,11 @@ def main():
     model = AutoModelForSequenceClassification.from_pretrained(MODELS[args.model],num_labels=3,
         ignore_mismatched_sizes=True, id2label={0:"neutral",1:"positive",2:"negative"},
         label2id={"neutral":0,"positive":1,"negative":2})
+    if args.technique in ("custom_head","mean_pool"):
+        from transformer_heads import install_head
+        install_head(model, args.technique)
     # Existing sentiment heads may use a different class order; reset classifier.
-    if args.model == "sentiment":
+    if args.model == "sentiment" and args.technique not in ("custom_head","mean_pool"):
         model.classifier.apply(model._init_weights)
     def encode(frame):
         ds = Dataset.from_dict({"text":frame.text.tolist(),"labels":frame.sentiment.astype(int).tolist()})
@@ -131,6 +164,7 @@ def main():
         data_collator=DataCollatorWithPadding(tok),compute_metrics=metrics,
         weights=weights,differential=args.technique=="differential",
         callbacks=[EarlyStoppingCallback(early_stopping_patience=2)])
+    trainer.technique = args.technique
     trainer.train(resume_from_checkpoint=get_last_checkpoint(str(out)))
     trainer.save_model(str(out/"best"))
     tok.save_pretrained(out/"best")
