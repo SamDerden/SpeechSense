@@ -111,7 +111,7 @@ def main():
     p.add_argument("--data", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--model", choices=MODELS, required=True)
-    p.add_argument("--technique", choices=["baseline","weighted","differential","smoothing","clipping","custom_head","mean_pool","mixup","fgm"], default="baseline")
+    p.add_argument("--technique", choices=["baseline","weighted","differential","smoothing","clipping","custom_head","mean_pool","mixup","fgm","back_translation","contextual"], default="baseline")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--epochs", type=int, default=3)
     p.add_argument("--batch", type=int, default=8)
@@ -145,6 +145,17 @@ def main():
     def encode(frame):
         ds = Dataset.from_dict({"text":frame.text.tolist(),"labels":frame.sentiment.astype(int).tolist()})
         return ds.map(lambda b:tok(b["text"],truncation=True,max_length=128),batched=True,remove_columns=["text"])
+    if args.technique in ("back_translation","contextual"):
+        from transformer_augmentation import augment
+        cache = out / "augmentation.csv"
+        if cache.exists():
+            extra = pd.read_csv(cache)
+        else:
+            extra = augment(train,args.technique,limit=4 if args.smoke else 3000,seed=args.seed,device=0 if torch.cuda.is_available() else -1)
+            extra.to_csv(cache,index=False)
+        forbidden = set(val.text.str.casefold()) | set(test.text.str.casefold())
+        extra = extra[~extra.text.str.casefold().isin(forbidden)]
+        train = pd.concat([train,extra],ignore_index=True)
     tr,va = encode(train),encode(val)
     weights = None
     if args.technique == "weighted":
