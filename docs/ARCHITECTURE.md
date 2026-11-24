@@ -8,7 +8,7 @@ Telegram (aiogram) → HTTP API (FastAPI) → Whisper ASR (для аудио) �
 - notebooks/02_classical_models.ipynb
 - notebooks/03_neural_networks.ipynb
 - notebooks/04_transformers.ipynb
-- notebooks/05_model_optimization.ipynb
+- notebooks/05_model_optimization.ipynb — только межсемейные ансамбли и сравнение; Optuna LogReg и fastText supervised в 02, все эксперименты с трансформерами в 04, FastText embeddings в 03.
 - notebooks/06_ASR_TTS.ipynb
 - notebooks/07_OOD_detection.ipynb
 - notebooks/08_final_comparison.ipynb
