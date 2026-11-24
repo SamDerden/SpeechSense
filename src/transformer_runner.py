@@ -22,6 +22,7 @@ MODELS = {
 }
 
 from dataset import clean, splits
+from evaluation import evaluate
 
 def metrics(p):
     pred = np.argmax(p.predictions, axis=-1)
@@ -202,7 +203,7 @@ def main():
         probs=torch.softmax(torch.tensor(result.predictions),dim=-1).numpy()
         pd.DataFrame({"row_id":frame.row_id.values,"label":frame.sentiment.values,
             "p0":probs[:,0],"p1":probs[:,1],"p2":probs[:,2]}).to_csv(out/f"{name}_predictions.csv",index=False)
-        (out/f"{name}_metrics.json").write_text(json.dumps(result.metrics,indent=2))
+        (out/f"{name}_metrics.json").write_text(json.dumps({**result.metrics, **evaluate(frame.sentiment.values, probs)},indent=2))
     (out/"history.json").write_text(json.dumps(trainer.state.log_history,indent=2))
 
 if __name__ == "__main__":
