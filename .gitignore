@@ -1,0 +1,9 @@
+.env
+__pycache__/
+.ipynb_checkpoints/
+data/*.csv.gz
+models/*.pt
+models/*.bin
+models/*.safetensors
+*.ogg
+*.wav
