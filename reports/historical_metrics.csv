@@ -1,0 +1,21 @@
+model,macro_f1,accuracy,source_notebook,source_cell_index,split,status
+LogReg TF-IDF,0.7482,0.7599,ru_sentiment_research_FINAL.ipynb,24,historical_validation,saved_output
+LinearSVC word+char,0.7467,0.7588,ru_sentiment_research_FINAL.ipynb,24,historical_validation,saved_output
+TextCNN baseline,0.7335,0.7384,ru_sentiment_research_FINAL.ipynb,45,historical_validation,saved_output
+BiLSTM Navec Focal,0.7577,0.757,ru_sentiment_research_FINAL.ipynb,48,historical_validation,saved_output
+TextCNN class weights,0.7314,0.7331,ru_sentiment_research_FINAL.ipynb,50,historical_validation,saved_output
+TextCNN augmentation,0.7351,0.7437,ru_sentiment_research_FINAL.ipynb,52,historical_validation,saved_output
+TextCNN augmentation focal,0.7301,0.7357,ru_sentiment_research_FINAL.ipynb,56,historical_validation,saved_output
+TextCNN Navec,0.7516,0.7611,ru_sentiment_research_FINAL.ipynb,58,historical_validation,saved_output
+TextCNN Navec focal,0.7476,0.7474,ru_sentiment_research_FINAL.ipynb,60,historical_validation,saved_output
+BiLSTM Navec CE,0.765,0.7789,ru_sentiment_research_FINAL.ipynb,62,historical_validation,saved_output
+TextCNN lemma augmentation,0.7355,0.7468,ru_sentiment_research_FINAL.ipynb,64,historical_validation,saved_output
+TextCNN mild weights,0.7349,0.7403,ru_sentiment_research_FINAL.ipynb,66,historical_validation,saved_output
+TextCNN neutral augmentation,0.7336,0.7417,ru_sentiment_research_FINAL.ipynb,68,historical_validation,saved_output
+TextCNN FastText,0.7523,0.7617,ru_sentiment_research_FINAL.ipynb,85,historical_validation,saved_output
+BiLSTM FastText CE,0.7455,0.758,ru_sentiment_research_FINAL.ipynb,101,historical_validation,saved_output
+BiLSTM FastText mean pooling,0.7456,0.7566,ru_sentiment_research_FINAL.ipynb,103,historical_validation,saved_output
+BiLSTM Navec regularized,0.763593,0.777262,ru_sentiment_research_FINAL.ipynb,127,historical_validation,saved_output
+RuBERT epoch 1,0.7788,0.7891,ru_sentiment_research_FINAL.ipynb,149,historical_validation,saved_output
+RuBERT epoch 2,0.8013,0.8101,ru_sentiment_research_FINAL.ipynb,149,historical_validation,saved_output
+RuBERT epoch 3,0.7993,0.808,ru_sentiment_research_FINAL.ipynb,149,historical_validation,saved_output
