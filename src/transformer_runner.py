@@ -36,6 +36,15 @@ class WeightedTrainer(Trainer):
         self.technique = "baseline"
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         labels = inputs.pop("labels")
+        if self.technique == "multitask":
+            out = model(**inputs, labels=labels)
+            return (out.loss,out) if return_outputs else out.loss
+        if self.technique == "distillation":
+            from transformer_advanced import distillation_loss
+            teacher = inputs.pop("teacher_logits", None)
+            out = model(**inputs)
+            loss = distillation_loss(out.logits,labels,teacher) if teacher is not None else torch.nn.functional.cross_entropy(out.logits,labels)
+            return (loss,out) if return_outputs else loss
         if self.technique == "mixup" and model.training:
             emb = model.get_input_embeddings()(inputs["input_ids"])
             perm = torch.randperm(len(labels), device=labels.device)
@@ -70,6 +79,12 @@ class WeightedTrainer(Trainer):
             with torch.no_grad():
                 emb.sub_(delta)
         return (loss.detach()+adv.detach()) / self.args.gradient_accumulation_steps
+    def _get_train_sampler(self, train_dataset=None):
+        if self.technique == "curriculum":
+            from transformer_advanced import CurriculumSampler
+            ds = self.train_dataset if train_dataset is None else train_dataset
+            return CurriculumSampler([len(x) for x in ds["input_ids"]],self.args.seed)
+        return super()._get_train_sampler()
     def create_optimizer(self):
         if not self.differential:
             return super().create_optimizer()
@@ -91,7 +106,8 @@ def main():
     p.add_argument("--data", required=True)
     p.add_argument("--out", required=True)
     p.add_argument("--model", choices=MODELS, required=True)
-    p.add_argument("--technique", choices=["baseline","weighted","differential","smoothing","clipping","custom_head","mean_pool","mixup","fgm","back_translation","contextual"], default="baseline")
+    p.add_argument("--technique", choices=["baseline","weighted","differential","smoothing","clipping","custom_head","mean_pool","mixup","fgm","back_translation","contextual","curriculum","distillation","multitask","active"], default="baseline")
+    p.add_argument("--teacher-logits")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--epochs", type=int, default=3)
     p.add_argument("--batch", type=int, default=8)
@@ -119,6 +135,9 @@ def main():
     if args.technique in ("custom_head","mean_pool"):
         from transformer_heads import install_head
         install_head(model, args.technique)
+    if args.technique == "multitask":
+        from transformer_advanced import install_multitask
+        install_multitask(model)
     # Existing sentiment heads may use a different class order; reset classifier.
     if args.model == "sentiment" and args.technique not in ("custom_head","mean_pool"):
         model.classifier.apply(model._init_weights)
@@ -137,6 +156,13 @@ def main():
         extra = extra[~extra.text.str.casefold().isin(forbidden)]
         train = pd.concat([train,extra],ignore_index=True)
     tr,va = encode(train),encode(val)
+    if args.technique == "distillation":
+        if not args.teacher_logits: raise ValueError("Provide teacher logits CSV for train")
+        teacher = pd.read_csv(args.teacher_logits).set_index("row_id")
+        if teacher.index.has_duplicates: raise ValueError("Duplicate teacher rows")
+        logits = teacher.loc[train.row_id, ["l0","l1","l2"]].to_numpy()
+        if not np.isfinite(logits).all(): raise ValueError("Invalid teacher logits")
+        tr = tr.add_column("teacher_logits",logits.tolist())
     weights = None
     if args.technique == "weighted":
         counts = train.sentiment.value_counts().reindex([0,1,2],fill_value=0).values
@@ -150,13 +176,25 @@ def main():
         lr_scheduler_type="cosine",warmup_ratio=.1,fp16=torch.cuda.is_available(),
         label_smoothing_factor=.1 if args.technique=="smoothing" else 0.,
         max_grad_norm=.5 if args.technique=="clipping" else 1.,
-        seed=args.seed,report_to=[],logging_steps=50)
+        remove_unused_columns=args.technique!="distillation",seed=args.seed,report_to=[],logging_steps=50)
     trainer = WeightedTrainer(model=model,args=ta,train_dataset=tr,eval_dataset=va,
         data_collator=DataCollatorWithPadding(tok),compute_metrics=metrics,
         weights=weights,differential=args.technique=="differential",
         callbacks=[EarlyStoppingCallback(early_stopping_patience=2)])
     trainer.technique = args.technique
-    trainer.train(resume_from_checkpoint=get_last_checkpoint(str(out)))
+    if args.technique == "active":
+        from transformer_advanced import uncertainty_indices
+        initial = train.sample(frac=.3,random_state=args.seed)
+        pool = train.drop(initial.index)
+        trainer.train_dataset = encode(initial)
+        trainer.train(resume_from_checkpoint=get_last_checkpoint(str(out)))
+        scores = trainer.predict(encode(pool)).predictions
+        selected = pool.iloc[uncertainty_indices(scores,max(1,len(pool)//2))]
+        trainer.train_dataset = encode(pd.concat([initial,selected]))
+        trainer.args.output_dir = str(out/"active_round2")
+        trainer.train(resume_from_checkpoint=get_last_checkpoint(trainer.args.output_dir))
+    else:
+        trainer.train(resume_from_checkpoint=get_last_checkpoint(str(out)))
     trainer.save_model(str(out/"best"))
     tok.save_pretrained(out/"best")
     for name,frame,ds in [("validation",val,va)]+([("test",test,encode(test))] if args.test else []):
