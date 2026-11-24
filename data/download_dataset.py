@@ -1,24 +1,38 @@
-"""Download the original archive without committing large data."""
 from pathlib import Path
-import gzip
 import hashlib
+import gzip
+import os
 import gdown
 
 TARGET = Path(__file__).resolve().parent / "merged_sentiment_dataset.csv.gz"
-FILE_ID = "1ShejwvJSUKxZ6mYEuJkrtqjwS0BiLZy_"
+URL = "https://drive.google.com/file/d/1ShejwvJSUKxZ6mYEuJkrtqjwS0BiLZy_/view?usp=drivesdk"
+EXPECTED_SIZE = 116681042
+
+def verify(path):
+    if path.stat().st_size != EXPECTED_SIZE:
+        raise ValueError(f"Unexpected archive size: {path.stat().st_size}")
+    with gzip.open(path, "rb") as f:
+        while f.read(1024 * 1024):
+            pass
+    with path.open("rb") as f:
+        print("SHA256:", hashlib.file_digest(f, "sha256").hexdigest())
 
 def main():
-    if not TARGET.exists():
-        tmp = TARGET.with_suffix(".part")
-        if not gdown.download(id=FILE_ID, output=str(tmp), quiet=False):
-            raise RuntimeError("Download failed; check Drive permissions")
-        with gzip.open(tmp, "rb") as f:
-            while f.read(1024 * 1024):
-                pass
-        tmp.replace(TARGET)
-    with TARGET.open("rb") as f:
-        print("SHA256:", hashlib.file_digest(f, "sha256").hexdigest())
-    print(TARGET, TARGET.stat().st_size)
+    TARGET.parent.mkdir(parents=True, exist_ok=True)
+    if TARGET.exists():
+        verify(TARGET)
+        print(TARGET)
+        return
+    tmp = TARGET.with_suffix(".part")
+    try:
+        result = gdown.download(url=URL, output=str(tmp), fuzzy=True, quiet=False)
+        if not result or not tmp.exists():
+            raise RuntimeError("Google Drive download failed. Check sharing permissions and quota.")
+        verify(tmp)
+        os.replace(tmp, TARGET)
+        print("Downloaded:", TARGET)
+    except Exception as exc:
+        raise RuntimeError(f"Dataset download failed: {exc}") from exc
 
 if __name__ == "__main__":
     main()
