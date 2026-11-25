@@ -109,6 +109,7 @@ def main():
     p.add_argument("--model", choices=MODELS, required=True)
     p.add_argument("--technique", choices=["baseline","weighted","differential","smoothing","clipping","custom_head","mean_pool","mixup","fgm","back_translation","contextual","curriculum","distillation","multitask","active"], default="baseline")
     p.add_argument("--teacher-logits")
+    p.add_argument("--export-teacher", action="store_true")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--epochs", type=int, default=3)
     p.add_argument("--batch", type=int, default=8)
@@ -125,6 +126,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     config = vars(args).copy()
     config.pop("test")
+    config.pop("export_teacher")
     manifest = out / "config.json"
     if manifest.exists() and json.loads(manifest.read_text()) != config:
         raise ValueError("Use a new output directory for a different configuration")
@@ -178,8 +180,16 @@ def main():
         label_smoothing_factor=.1 if args.technique=="smoothing" else 0.,
         max_grad_norm=.5 if args.technique=="clipping" else 1.,
         remove_unused_columns=args.technique!="distillation",seed=args.seed,report_to=[],logging_steps=50)
+    pad = DataCollatorWithPadding(tok)
+    def collate(features):
+        features = [dict(f) for f in features]
+        teacher = [f.pop("teacher_logits", None) for f in features]
+        batch = pad(features)
+        if all(x is not None for x in teacher):
+            batch["teacher_logits"] = torch.tensor(teacher,dtype=torch.float32)
+        return batch
     trainer = WeightedTrainer(model=model,args=ta,train_dataset=tr,eval_dataset=va,
-        data_collator=DataCollatorWithPadding(tok),compute_metrics=metrics,
+        data_collator=collate,compute_metrics=metrics,
         weights=weights,differential=args.technique=="differential",
         callbacks=[EarlyStoppingCallback(early_stopping_patience=2)])
     trainer.technique = args.technique
@@ -196,6 +206,10 @@ def main():
         trainer.train(resume_from_checkpoint=get_last_checkpoint(trainer.args.output_dir))
     else:
         trainer.train(resume_from_checkpoint=get_last_checkpoint(str(out)))
+    if args.export_teacher:
+        result = trainer.predict(encode(train))
+        logits = result.predictions
+        pd.DataFrame({"row_id":train.row_id.values,"l0":logits[:,0],"l1":logits[:,1],"l2":logits[:,2]}).to_csv(out/"teacher_logits.csv",index=False)
     trainer.save_model(str(out/"best"))
     tok.save_pretrained(out/"best")
     for name,frame,ds in [("validation",val,va)]+([("test",test,encode(test))] if args.test else []):
